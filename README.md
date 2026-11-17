@@ -1,6 +1,6 @@
 # WITNESS
 
-**[Live demo](https://witness-hybrid.web.app/)** · [Public repository](https://github.com/kks0488/witness)
+**[Live demo](https://witness-hybrid.web.app/)** · [Demo video](https://youtu.be/blVMR4pKJQw) · [Public repository](https://github.com/kks0488/witness)
 
 **Requirements:** Live investigations need desktop Chrome Canary with `chrome://flags/#gemma4-for-built-in-ai` enabled and Nano 4 downloaded; recorded executions can be replayed in an ordinary browser with no model or cloud calls.
 
@@ -125,7 +125,7 @@ The live harness generated two rounds of cloud expression proposals, executed pu
 - The live UI's cloud follow-up receives aggregate counts derived from the charged symbols, not a literal copy of the displayed strip. The strip and row findings are displayed locally. The headline describes the source-dependent answer channel.
 - A model can extract the wrong fact or choose incomplete hypotheses. The small synthetic measurements do not establish production accuracy, latency, cost savings or robustness against arbitrary attacks. No such claims are made.
 - The wall view needs real models for a new investigation and offers labeled playback of saved executions without model calls. The key-free scripted baseline also remains in the legacy view. Mobile platforms have not been validated here.
-- The public repository and hosted judging demo are linked above. The actual extraction path uses Firebase AI Logic `ONLY_ON_DEVICE`; Canary call stacks and SDK response provenance were checked during the measurements. A public video and final submission are not included here.
+- The public repository, hosted judging demo and demo video are linked above. The actual extraction path uses Firebase AI Logic `ONLY_ON_DEVICE`; Canary call stacks and SDK response provenance were checked during the measurements.
 
 ## What was built and what is reused
 
