@@ -5,6 +5,9 @@ import {OpenWitness} from './open-witness';
 import {GROUP_PROCEDURE,runTreeInvestigation,treeReceipt,type TreeRun} from './tree-search';
 import {bitsPerAnswer,usedBits} from './protocol';
 import {escape} from './ui/helpers';
+import {RECORDED_RUNS} from './recorded-runs';
+import {replayFrame} from './recorded-replay';
+import {checkLocalReadiness,LOCAL_OPTIONS,type LocalReadiness,type LocalModelAPI} from './local-readiness';
 import './tree.css';
 type Log={phase?:string;prompt:string;raw?:string;inferenceSource?:string};
 const TASKS:Record<TaskId,string>={reply:'Customer inquiries',refund:'Refund review',receipt:'Expense review'} as Record<TaskId,string>;
@@ -21,6 +24,22 @@ function ladder(run:TreeRun,id:string):string {
 
 export async function initTreeApp(){
  const root=document.querySelector<HTMLDivElement>('#app')!;let run:TreeRun|undefined,log:Log[]=[],recorded=false,busy=false,task:TaskId='refund',cap=128,calls=0,fields=0;
+ let replayTimer:ReturnType<typeof setTimeout>|undefined,replaying=false,helpOpen=false,readiness:LocalReadiness='checking',nano4Confirmed=false,notice='',preparing=false;
+ let recordedMeta:{local:number;cloud:number;fields:number;total:number;cap:number;date:string}|undefined;
+ const localAPI=()=>(window as unknown as {LanguageModel?:LocalModelAPI}).LanguageModel;
+ const refreshReadiness=async()=>{readiness=await checkLocalReadiness(localAPI());render();return readiness;};
+ const stopReplay=()=>{clearTimeout(replayTimer);replayTimer=undefined;replaying=false;};
+ const reset=()=>{stopReplay();run=undefined;log=[];calls=0;fields=0;recorded=false;recordedMeta=undefined;notice='';};
+ const receipt=()=>run?{...treeReceipt(run,log,{calls:recordedMeta?.local??calls,fields:recordedMeta?.fields??fields}),...(recorded?{replay:true,playbackModelCalls:0,playbackCloudCalls:0,originalLocalModelCalls:recordedMeta?.local,originalCloudCalls:recordedMeta?.cloud}:{})}:null;
+ const play=()=>{
+  if(busy)return;
+  if(replaying){stopReplay();render();return;}
+  reset();recorded=true;
+  const saved=RECORDED_RUNS[task],source=saved.run;cap=source.ledger.limit;let count=0;replaying=true;
+  recordedMeta={local:saved.localModelCalls,cloud:source.cloudCalls,fields:saved.localExtractedFieldCount,total:source.exchanges.length,cap:source.ledger.limit,date:source.startedAt.slice(0,10)};
+  const tick=()=>{run=replayFrame(source,count);if(count===source.exchanges.length)stopReplay();render();if(replaying){count++;replayTimer=setTimeout(tick,220);}};
+  tick();
+ };
  const render=()=>{
   const limit=run?.ledger.limit??cap,bits=run?usedBits(run.ledger):0,remaining=limit-bits,answers=run?.ledger.answers??[];
   const n=run?.task.rowCount??DATASETS[task].rows.length,found=new Set(run?.slots??[]),open=new Set(run?.usage.flatMap(u=>u.unconfirmed)??[]);
@@ -28,9 +47,15 @@ export async function initTreeApp(){
   const tape=Array.from({length:maxAnswers},(_,i)=>answers[i]?`<i class="tw-${answers[i]}">${answers[i]}</i>`:'<i></i>').join('');
   const rows=Array.from({length:n},(_,i)=>`<i class="${found.has(i+1)?'tw-hit':open.has(i+1)?'tw-open':''}">${found.has(i+1)?i+1:''}</i>`).join('');
   const rejected=new Map((run?.rejections??[]).map(r=>[r.id,r.reason]));
-  const mode=recorded?'Recorded run · replayed locally':busy?'Interview in progress':'Ready';
+  const mode=recorded?`Replay · ${replaying?'playing':'paused / complete'}`:busy?'Interview in progress':'Live investigation';
+  const localReady=readiness==='available'&&nano4Confirmed;
+  const preparation=readiness==='checking'?'Checking local model…':readiness==='available'?(nano4Confirmed?'Ready (Nano 4 setup confirmed)':'Local model available · confirm Nano 4 setup'):readiness==='downloading'?'Downloading local model':readiness==='downloadable'?'Local model download needed':'Local model unavailable in this browser';
   root.innerHTML=`<main class="tree-app tw">
-   <header><a class="wordmark" href="/">WITNESS<span>TWENTY QUESTIONS FOR PRIVATE DATA</span></a><span class="tree-mode">${mode.toUpperCase()}</span></header>
+   <header><a class="wordmark" href="/">WITNESS<span>TWENTY QUESTIONS FOR PRIVATE DATA</span></a><div class="tw-header-actions"><span class="tree-mode">${mode.toUpperCase()}</span><button id="tree-help" aria-label="About this screen" aria-expanded="${helpOpen}" aria-controls="tree-intro">?</button></div></header>
+   <div id="tree-intro" class="tw-intro" ${helpOpen?'':'hidden'}><p>Left: the complete Y / N / X answer strip released to the cloud investigator.</p><p>Right: records and flagged row positions that stay on the device.</p><p>The wall marks the boundary: source text and extracted values do not cross it.</p></div>
+   <section class="tw-preparation" aria-label="Browser preparation"><div class="tw-ready-row"><p id="tree-readiness" role="status"><i class="${localReady?'is-ready':''}"></i>${preparation}</p><button id="tree-recheck" ${preparing||busy?'disabled':''}>Check again</button></div>
+    ${!localReady?`<div id="tree-setup" class="tw-setup"><p><b>For a live investigation</b> · Or choose “Watch recorded run” below.</p><ol><li>Open Chrome Canary.</li><li>Enable <code>chrome://flags/#gemma4-for-built-in-ai</code>.</li><li>Relaunch Canary and reopen this page.</li></ol><p><a href="https://github.com/kks0488/witness#run-the-actual-models-with-your-own-firebase-project" target="_blank" rel="noopener noreferrer">README: requirements & setup ↗</a></p>${readiness==='available'?'<label class="tw-confirm"><input type="checkbox" id="tree-confirm"> I enabled the Gemma 4 flag in Canary and relaunched. <span>Chrome reports availability, but does not expose the model version to this page.</span></label>':''}${readiness==='downloadable'||readiness==='downloading'?`<button id="tree-prepare" ${preparing?'disabled':''}>${preparing?'Preparing local model…':'Prepare / download local model'}</button><p>The browser manages the model download. Recheck when it finishes.</p>`:''}</div>`:''}
+   </section>
    <section class="tw-hero">
     <div class="tw-side tw-cloud">
      <p class="tw-eyebrow">The cloud investigator · never sees a record</p>
@@ -48,7 +73,9 @@ export async function initTreeApp(){
      <p class="tw-key"><i class="tw-hit"></i> flagged <i class="tw-open"></i> unconfirmed<span>Source text released: 0 bytes</span></p>
     </div>
    </section>
-   <section class="tree-toolbar"><label>Investigation <select id="tree-task" ${busy?'disabled':''}>${(Object.keys(TASKS) as TaskId[]).map(t=>`<option value="${t}" ${task===t?'selected':''}>${TASKS[t]}</option>`).join('')}</select></label><label>Bit cap <select id="tree-cap" ${busy?'disabled':''}><option ${cap===64?'selected':''}>64</option><option ${cap===128?'selected':''}>128</option></select></label><button class="primary" id="tree-start" ${busy?'disabled':''}>${busy?'Interviewing…':'Start investigation →'}</button><button id="tree-receipt" ${run&&!busy?'':'disabled'}>Disclosure receipt ↗</button><span>${run?.status??'Ready'} · ${calls} on-device calls · ${run?.cloudCalls??0} cloud calls</span></section>
+   <section class="tree-toolbar"><label>Investigation <select id="tree-task" ${busy?'disabled':''}>${(Object.keys(TASKS) as TaskId[]).map(t=>`<option value="${t}" ${task===t?'selected':''}>${TASKS[t]}</option>`).join('')}</select></label><label>Bit cap <select id="tree-cap" ${busy?'disabled':''}><option ${cap===64?'selected':''}>64</option><option ${cap===128?'selected':''}>128</option></select></label><button class="primary" id="tree-start" ${busy?'disabled':''}>${busy?'Interviewing…':'Start investigation →'}</button><button id="tree-replay" ${busy?'disabled':''}>${replaying?'Pause replay':'Watch recorded run'}</button><button id="tree-receipt" ${run&&!busy?'':'disabled'}>Disclosure receipt ↗</button><span>${recorded?'Replay':run?.status??'No investigation yet'} · ${calls} on-device calls · ${recorded?0:run?.cloudCalls??0} cloud calls</span></section>
+   ${recorded?`<p class="tw-playback" role="status"><b>REPLAY</b> Saved execution · ${escape(recordedMeta?.date??'')} · ${run?.exchanges.length??0}/${recordedMeta?.total??0} recorded answers. No models are running. Original run: ${recordedMeta?.local??0} local / ${recordedMeta?.cloud??0} cloud calls · ${recordedMeta?.cap??cap}-bit cap.</p>`:''}
+   ${notice?`<p class="tw-notice" role="alert">${escape(notice)}</p>`:''}
    <section class="tw-body">
     <div class="tw-questions">
      <div class="tw-head"><h3>The interview</h3><p>${run?escape(run.task.objective):'A clear objective becomes a handful of testable questions. No record values enter this panel.'}</p><div class="tw-axis"><span>row 1</span><span>row ${n}</span></div></div>
@@ -64,15 +91,37 @@ export async function initTreeApp(){
     </aside>
    </section>
    <footer class="tree-foot">Source text released: 0 bytes <span>Extracted field values released: 0</span><a href="/?legacy=1">Earlier comparison workspace ↗</a></footer>
-   <dialog id="tree-receipt-dialog"><div class="tree-receipt-sheet"><button id="tree-close" style="float:right">Close ×</button><p class="eyebrow">WITNESS / DISCLOSURE RECEIPT · ${recorded?'RECORDED EXECUTION':'LOCAL RECORD'}</p><h2>Every answer. Every exception.</h2>${run?`<div class="tree-receipt-stats"><div><strong>${run.ledger.answers.length}</strong><span>witness answers</span></div><div><strong>${bits.toFixed(2)} / ${run.ledger.limit}</strong><span>answer-channel bits</span></div><div><strong>${run.shared?.length??0}</strong><span>merged predicates · 0 new answers</span></div><div><strong>0</strong><span>source text bytes</span></div></div><p>${escape(run.task.objective)}</p><p>Status: <b>${run.status}</b> · ${remaining.toFixed(2)} bits remaining · ${run.cloudCalls} investigator calls</p><table><thead><tr><th>Predicate</th><th>Answers</th><th>Bits</th><th>Identified Y / X</th><th>Coverage</th></tr></thead><tbody>${run.usage.map(u=>`<tr><td>${escape(u.id)}</td><td>${u.answers}</td><td>${u.bits.toFixed(2)}</td><td>${u.y} / ${u.x}</td><td>${u.status}</td></tr>`).join('')}</tbody></table><p>Round one ≤ 60% of cap · remaining capacity reserved for the follow-up. Breadth first, rotating across predicates. Equivalent tests share one scan.</p><h3>Shared predicates</h3><p>${run.shared?.map(s=>`${escape(s.id)} → ${escape(s.targetId)} (${s.inverted?'inverted singleton answers':'same meaning'})`).join('<br>')||'None.'}</p><h3>Released symbols</h3><p class="tree-symbols">${run.ledger.answers.join(' ')}</p><h3>Public validation refusals</h3><p>${run.rejections.map(r=>`${escape(r.id)}: ${escape(r.reason)} (0 bits)`).join('<br>')||'None.'}</p><p class="muted">${escape(treeReceipt(run,log,{calls,fields}).limitations)}</p>`:''}<button class="primary" id="tree-download">Download receipt ↓</button></div></dialog></main>`;
-  document.querySelector('#tree-task')?.addEventListener('change',e=>{task=(e.target as HTMLSelectElement).value as TaskId;run=undefined;recorded=false;render();});
-  document.querySelector('#tree-cap')?.addEventListener('change',e=>{cap=Number((e.target as HTMLSelectElement).value);run=undefined;recorded=false;render();});
-  document.querySelector('#tree-receipt')?.addEventListener('click',()=>document.querySelector<HTMLDialogElement>('#tree-receipt-dialog')!.showModal());
+   <dialog id="tree-receipt-dialog"><div class="tree-receipt-sheet"><button id="tree-close" style="float:right">Close ×</button><p class="eyebrow">WITNESS / DISCLOSURE RECEIPT · ${recorded?'REPLAY OF RECORDED EXECUTION':'LOCAL RECORD'}</p><h2>Every answer. Every exception.</h2>${recorded?'<p><b>Replay: 0 model calls and 0 cloud calls during playback. The answers and investigation counts below describe the saved execution.</b></p>':''}${run?`<div class="tree-receipt-stats"><div><strong>${run.ledger.answers.length}</strong><span>witness answers</span></div><div><strong>${bits.toFixed(2)} / ${run.ledger.limit}</strong><span>answer-channel bits</span></div><div><strong>${run.shared?.length??0}</strong><span>merged predicates · 0 new answers</span></div><div><strong>0</strong><span>source text bytes</span></div></div><p>${escape(run.task.objective)}</p><p>Status: <b>${run.status}</b> · ${remaining.toFixed(2)} bits remaining · ${run.cloudCalls} investigator calls${recorded?' in saved execution':''}</p><table><thead><tr><th>Predicate</th><th>Answers</th><th>Bits</th><th>Identified Y / X</th><th>Coverage</th></tr></thead><tbody>${run.usage.map(u=>`<tr><td>${escape(u.id)}</td><td>${u.answers}</td><td>${u.bits.toFixed(2)}</td><td>${u.y} / ${u.x}</td><td>${u.status}</td></tr>`).join('')}</tbody></table><p>Round one ≤ 60% of cap · remaining capacity reserved for the follow-up. Breadth first, rotating across predicates. Equivalent tests share one scan.</p><h3>Shared predicates</h3><p>${run.shared?.map(s=>`${escape(s.id)} → ${escape(s.targetId)} (${s.inverted?'inverted singleton answers':'same meaning'})`).join('<br>')||'None.'}</p><h3>Released symbols</h3><p class="tree-symbols">${run.ledger.answers.join(' ')}</p><h3>Public validation refusals</h3><p>${run.rejections.map(r=>`${escape(r.id)}: ${escape(r.reason)} (0 bits)`).join('<br>')||'None.'}</p><p class="muted">${escape(treeReceipt(run,log,{calls,fields}).limitations)}</p>`:''}<button class="primary" id="tree-download">Download receipt ↓</button></div></dialog></main>`;
+  document.querySelector('#tree-help')?.addEventListener('click',()=>{helpOpen=!helpOpen;render();document.querySelector<HTMLButtonElement>('#tree-help')?.focus();});
+  document.querySelector('#tree-replay')?.addEventListener('click',play);
+  document.querySelector('#tree-recheck')?.addEventListener('click',()=>{void refreshReadiness();});
+  document.querySelector('#tree-confirm')?.addEventListener('change',e=>{nano4Confirmed=(e.target as HTMLInputElement).checked;render();});
+  document.querySelector('#tree-prepare')?.addEventListener('click',async()=>{
+   const api=localAPI();if(!api||preparing)return;preparing=true;notice='';readiness='downloading';render();
+   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),120000);
+   try {const session=await api.create({...LOCAL_OPTIONS,signal:controller.signal});session.destroy();}
+   catch {notice='The local model is not ready yet. Check Canary, the Gemma 4 flag and available disk space, then try again. No records were sent to a cloud model.';}
+   finally {clearTimeout(timer);preparing=false;await refreshReadiness();}
+  });
+  document.querySelector('#tree-task')?.addEventListener('change',e=>{task=(e.target as HTMLSelectElement).value as TaskId;reset();render();});
+  document.querySelector('#tree-cap')?.addEventListener('change',e=>{cap=Number((e.target as HTMLSelectElement).value);reset();render();});
+  document.querySelector('#tree-receipt')?.addEventListener('click',()=>{if(replaying){stopReplay();render();}document.querySelector<HTMLDialogElement>('#tree-receipt-dialog')!.showModal();});
   document.querySelector('#tree-close')?.addEventListener('click',()=>document.querySelector<HTMLDialogElement>('#tree-receipt-dialog')!.close());
-  document.querySelector('#tree-download')?.addEventListener('click',()=>{if(!run)return;const url=URL.createObjectURL(new Blob([JSON.stringify(treeReceipt(run,log,{calls,fields}),null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='witness-receipt.json';a.click();URL.revokeObjectURL(url);});
-  document.querySelector('#tree-start')?.addEventListener('click',async()=>{if(busy)return;busy=true;recorded=false;run=undefined;render();try{await loadHypothesisModels();const i=await treeInvestigator(),w=new OpenWitness(undefined,false);run=await runTreeInvestigation(DATASETS[task],i,w,{limit:cap,onUpdate:r=>{run=r;log=i.log;calls=w.calls;fields=w.extractedFieldCount;render();}});}finally{busy=false;render();}});
+  document.querySelector('#tree-download')?.addEventListener('click',()=>{if(!run)return;const url=URL.createObjectURL(new Blob([JSON.stringify(receipt(),null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=recorded?'witness-replay-receipt.json':'witness-receipt.json';a.click();URL.revokeObjectURL(url);});
+  document.querySelector('#tree-start')?.addEventListener('click',async()=>{
+   if(busy||preparing)return;reset();busy=true;render();
+   try {
+    readiness=await checkLocalReadiness(localAPI());
+    if(readiness!=='available'||!nano4Confirmed){notice=readiness==='available'?'Before starting, confirm the Nano 4 setup above. Chrome cannot report the model version to this page. You can also watch a recorded run.':'This browser is not ready for a local investigation. Follow the three setup steps above, or watch a recorded run. No records were sent to a cloud model.';return;}
+    await loadHypothesisModels();const i=await treeInvestigator(),w=new OpenWitness(undefined,false);
+    run=await runTreeInvestigation(DATASETS[task],i,w,{limit:cap,onUpdate:r=>{run=r;log=i.log;calls=w.calls;fields=w.extractedFieldCount;render();}});
+    if(run.status==='error')notice='The investigation stopped because a model or connection failed. This is not a clean result. Check the browser setup and Firebase configuration, or watch a recorded run. Source records have no cloud fallback.';
+   }catch {notice='Live investigation could not start. Check the README for Firebase configuration and browser requirements, or watch a recorded run. Source records have no cloud fallback.';}
+   finally{busy=false;render();}
+  });
  };
- (window as unknown as Record<string,unknown>).__witnessReplay8=(v:{run:TreeRun;cloudLog:Log[];nanoCalls:number;extractedFieldCount:number;task:TaskId})=>{run=v.run;task=v.task;cap=run.ledger.limit;log=v.cloudLog;calls=v.nanoCalls;fields=v.extractedFieldCount;recorded=true;busy=false;render();};
- (window as unknown as Record<string,unknown>).__witnessReceipt8=()=>run?treeReceipt(run,log,{calls,fields}):null;
+ (window as unknown as Record<string,unknown>).__witnessReplay8=(v:{run:TreeRun;cloudLog:Log[];nanoCalls:number;extractedFieldCount:number;task:TaskId})=>{if(busy)return;reset();run=v.run;task=v.task;cap=run.ledger.limit;log=v.cloudLog;recordedMeta={local:v.nanoCalls,cloud:run.cloudCalls,fields:v.extractedFieldCount,total:run.exchanges.length,cap,date:run.startedAt.slice(0,10)};recorded=true;render();};
+ (window as unknown as Record<string,unknown>).__witnessReceipt8=receipt;
  render();
+ void refreshReadiness();
 }

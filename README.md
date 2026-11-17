@@ -1,5 +1,9 @@
 # WITNESS
 
+**[Live demo](https://witness-hybrid.web.app/)** · [Public repository](https://github.com/kks0488/witness)
+
+**Requirements:** Live investigations need desktop Chrome Canary with `chrome://flags/#gemma4-for-built-in-ai` enabled and Nano 4 downloaded; recorded executions can be replayed in an ordinary browser with no model or cloud calls.
+
 **The cloud investigator never sees the source records. It learns only yes, no, or unknown from the device.**
 
 A reviewer wants to find questionable refunds, expenses without evidence, or customers still owed a reply. Sending an entire ledger to a cloud model is a large disclosure for a small decision. WITNESS lets a cloud model propose tests while the records and flagged row positions stay on the device.
@@ -28,7 +32,7 @@ npm run build
 npm run dev -- --port 5173
 ```
 
-Open **http://localhost:5173/** for the current wall layout. With no Firebase settings this is a ready-state preview; its **Start investigation** button requires live models. It does not run a key-free tree investigation.
+Open **http://localhost:5173/** for the current wall layout. Choose **Watch recorded run** to replay a real, saved execution on synthetic fixtures. It is labeled **Replay**, makes zero model or cloud calls, and shows the historical answer strip and device findings. Starting a new investigation requires the local model and Firebase settings; records have no cloud fallback. The **?** button explains the two sides of the wall.
 
 For the functioning key-free, scripted baseline, open **http://localhost:5173/?legacy** in the same server:
 
@@ -41,7 +45,9 @@ The baseline runs entirely in the browser on synthetic fixtures. It uses neither
 
 ## Run the actual models with your own Firebase project
 
-The measured setup was desktop **Chrome Canary 160** with **chrome://flags/#gemma4-for-built-in-ai** enabled and the local Nano 4 model available. Other Chrome builds and hardware have not been validated for these results. Follow the [Firebase hybrid setup](https://firebase.google.com/docs/ai-logic/hybrid/web/get-started) for current platform prerequisites; its general Chrome minimum does not establish that the required Nano 4 model is installed. The app has no model downloader or browser setup wizard.
+The measured setup was desktop **Chrome Canary 160** with the local Nano 4 model available. To prepare the browser: **1. Open Chrome Canary. 2. Enable `chrome://flags/#gemma4-for-built-in-ai`. 3. Relaunch and reopen the demo.** A model download may still be required. Other Chrome builds and hardware have not been validated for these results. Follow the [Firebase hybrid setup](https://firebase.google.com/docs/ai-logic/hybrid/web/get-started) for current platform prerequisites; its general Chrome minimum does not establish that the required Nano 4 model is installed.
+
+The preparation line checks Chrome's actual English text-model availability with the same input/output language options as extraction. [Chrome's Prompt API](https://developer.chrome.com/docs/ai/prompt-api) exposes availability, not a model-version field. Therefore **“local model available” does not certify Nano 4**: confirm the Canary / Gemma 4 setup before starting. “Ready (Nano 4 setup confirmed)” combines the browser availability check with that explicit user confirmation. If needed, **Prepare / download local model** asks Chrome to prepare a local session and immediately releases it; it sends no record or prompt. The page never substitutes a cloud model for missing local support.
 
 1. Use your own existing **Spark project with no linked billing**, register a Web app, and enable Firebase AI Logic using the Gemini Developer API in the Firebase console. The current investigator requests `gemini-3.5-flash-lite`. Confirm its availability and your project's free quota before running.
 2. Register the Web app with [Firebase App Check / reCAPTCHA Enterprise](https://firebase.google.com/docs/app-check/web/recaptcha-enterprise-provider). Supply its site key. For local development, privately register an App Check debug token in that project's console. The app uses a CustomProvider and the documented token exchange to avoid the SDK's debug-token console logging. A nonempty site-key setting is still required by the app's configuration gate when using a debug token. Do not disable App Check.
@@ -78,6 +84,8 @@ Open **http://localhost:5173/** in the configured Canary. Keep the default **128
 If the legacy page stays in demo mode, check the required settings and restart Vite. If App Check or AI Logic returns 403, check project registration, token registration and the exact hostname/referrer. If local inference is unavailable, check Canary, the flag and model readiness. No cloud fallback is permitted for source-bearing local extraction.
 
 ## Measured results
+
+On November 17, 2026, the hosted demo was also run through its normal UI with the original synthetic tasks at a 128-bit cap. Refund review found 4/4 issues with 0 false findings, 71.32 bits, 132.20 seconds and 120 local / 2 cloud calls; expense review found 4/4 with 0 false findings, 106.19 bits, 186.64 seconds and 180 / 2 calls; customer inquiries found 2/2 with 0 false findings, 17.43 bits, 17.21 seconds and 6 / 2 calls. App Check token exchange succeeded and all three receipts opened. These are single hosted runs of the original fixtures, not a new holdout or a latency benchmark. Fresh cloud proposals can change the work and timing. The replay button uses these saved hosted transcripts; playback itself performs zero model or cloud calls.
 
 The November 17, 2026 remeasurement below uses **Firebase AI Logic for both inference paths**: cloud proposals through `ONLY_IN_CLOUD`, and source-bearing Nano 4 extraction through `ONLY_ON_DEVICE`. The SDK device route was verified with native call stacks, structured responses, response provenance and an isolated local-only run with **zero external requests**. The browser reported Canary 160.0.8165.0, the v4 feature flag, `prompt_api_gemma4` available and the ready `gemma4_component` version `2026.11.3.1140`. Firebase identifies the response as on-device; the model version evidence comes from Chrome, not an SDK model-name field.
 
@@ -116,8 +124,8 @@ The live harness generated two rounds of cloud expression proposals, executed pu
 - Y/N/X can still reveal sensitive facts. The cap limits their information capacity; validation and refusal guards do not prove that every question is harmless.
 - The live UI's cloud follow-up receives aggregate counts derived from the charged symbols, not a literal copy of the displayed strip. The strip and row findings are displayed locally. The headline describes the source-dependent answer channel.
 - A model can extract the wrong fact or choose incomplete hypotheses. The small synthetic measurements do not establish production accuracy, latency, cost savings or robustness against arbitrary attacks. No such claims are made.
-- The wall view needs real models to execute. The key-free scripted demo uses the existing legacy view. Browser/model setup remains manual. Mobile platforms and a production deployment have not been implemented or validated here.
-- No public repository, public video or hosted judging link is included in this preparation bundle. The actual extraction path now uses Firebase AI Logic `ONLY_ON_DEVICE`; Canary call stacks and SDK response provenance were checked during the new measurements below. Public repository, video, hosted judging access and final submission remain unfinished.
+- The wall view needs real models for a new investigation and offers labeled playback of saved executions without model calls. The key-free scripted baseline also remains in the legacy view. Mobile platforms have not been validated here.
+- The public repository and hosted judging demo are linked above. The actual extraction path uses Firebase AI Logic `ONLY_ON_DEVICE`; Canary call stacks and SDK response provenance were checked during the measurements. A public video and final submission are not included here.
 
 ## What was built and what is reused
 
